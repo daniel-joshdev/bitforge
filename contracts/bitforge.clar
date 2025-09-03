@@ -96,3 +96,108 @@
     birth-block: uint,
   }
 )
+
+;; Realm Registry
+(define-map realms
+  { realm-id: uint }
+  {
+    name: (string-ascii 50),
+    description: (string-ascii 200),
+    entry-level-requirement: uint,
+    active-adventurers: uint,
+    reward-multiplier: uint,
+  }
+)
+
+;; Player Profiles
+(define-map adventurer-profiles
+  { adventurer: principal }
+  {
+    primary-hero-id: uint,
+    lifetime-score: uint,
+    victories: uint,
+    bitcoin-earnings: uint,
+    leaderboard-rank: uint,
+    registration-block: uint,
+  }
+)
+
+;; Additional validation functions for enhanced security
+(define-private (is-valid-hero-id (hero-id uint))
+  (and (> hero-id u0) (< hero-id (var-get next-hero-id)))
+)
+
+(define-private (is-valid-adventurer (adventurer principal))
+  (and
+    (is-standard adventurer)
+    (is-some (get-adventurer-profile adventurer))
+  )
+)
+
+(define-private (is-valid-string
+    (text (string-ascii 200))
+    (min-len uint)
+    (max-len uint)
+  )
+  (and
+    (>= (len text) min-len)
+    (<= (len text) max-len)
+    (> (len text) u0)
+  )
+)
+
+(define-private (is-valid-rarity (rarity (string-ascii 20)))
+  (or
+    (is-eq rarity RARITY-COMMON)
+    (is-eq rarity RARITY-UNCOMMON)
+    (is-eq rarity RARITY-RARE)
+    (is-eq rarity RARITY-EPIC)
+    (is-eq rarity RARITY-LEGENDARY)
+  )
+)
+
+(define-private (calculate-level-requirement (level uint))
+  (* level level BASE-XP-MULTIPLIER)
+)
+
+(define-private (can-advance-level
+    (current-xp uint)
+    (current-level uint)
+  )
+  (>= current-xp (calculate-level-requirement (+ current-level u1)))
+)
+
+;; READ-ONLY FUNCTIONS
+
+(define-read-only (is-authorized-operator (user principal))
+  (or
+    (is-eq user (var-get contract-owner))
+    (default-to false (map-get? authorized-operators user))
+  )
+)
+
+(define-read-only (get-artifact-info (artifact-id uint))
+  (map-get? artifacts { artifact-id: artifact-id })
+)
+
+(define-read-only (get-hero-info (hero-id uint))
+  (map-get? heroes { hero-id: hero-id })
+)
+
+(define-read-only (get-realm-info (realm-id uint))
+  (map-get? realms { realm-id: realm-id })
+)
+
+(define-read-only (get-adventurer-profile (adventurer principal))
+  (map-get? adventurer-profiles { adventurer: adventurer })
+)
+
+(define-read-only (get-protocol-statistics)
+  {
+    total-artifacts-forged: (- (var-get next-artifact-id) u1),
+    total-heroes-created: (- (var-get next-hero-id) u1),
+    total-realms-active: (- (var-get next-realm-id) u1),
+    bitcoin-prize-pool: (var-get total-prize-pool),
+    protocol-fee-bps: (var-get protocol-fee-bps),
+  }
+)
