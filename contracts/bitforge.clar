@@ -304,3 +304,115 @@
     (ok hero-id)
   )
 )
+
+(define-public (establish-realm
+    (name (string-ascii 50))
+    (description (string-ascii 200))
+    (entry-level uint)
+    (reward-multiplier uint)
+  )
+  (let ((realm-id (var-get next-realm-id)))
+    (asserts! (is-authorized-operator tx-sender) ERR-UNAUTHORIZED)
+    (asserts! (is-valid-string name MIN-NAME-LENGTH MAX-NAME-LENGTH)
+      ERR-INVALID-INPUT
+    )
+    (asserts! (is-valid-string description u1 MAX-DESCRIPTION-LENGTH)
+      ERR-INVALID-INPUT
+    )
+    (asserts! (<= entry-level MAX-HERO-LEVEL) ERR-INVALID-INPUT)
+    (asserts! (and (> reward-multiplier u0) (<= reward-multiplier u500))
+      ERR-INVALID-INPUT
+    )
+
+    (map-set realms { realm-id: realm-id } {
+      name: name,
+      description: description,
+      entry-level-requirement: entry-level,
+      active-adventurers: u0,
+      reward-multiplier: reward-multiplier,
+    })
+
+    (var-set next-realm-id (+ realm-id u1))
+    (ok realm-id)
+  )
+)
+
+;; PROGRESSION & REWARD SYSTEM  
+
+(define-public (award-experience
+    (hero-id uint)
+    (xp-amount uint)
+  )
+  (let (
+      (hero-data (unwrap! (get-hero-info hero-id) ERR-NOT-FOUND))
+      (current-xp (get total-experience hero-data))
+      (current-level (get level hero-data))
+      (new-total-xp (+ current-xp xp-amount))
+    )
+    (asserts! (is-authorized-operator tx-sender) ERR-UNAUTHORIZED)
+    (asserts! (> xp-amount u0) ERR-INVALID-INPUT)
+    (asserts! (< current-level MAX-HERO-LEVEL) ERR-MAX-LIMIT-REACHED)
+
+    (let ((new-level (if (can-advance-level new-total-xp current-level)
+        (+ current-level u1)
+        current-level
+      )))
+      (map-set heroes { hero-id: hero-id }
+        (merge hero-data {
+          total-experience: new-total-xp,
+          level: new-level,
+        })
+      )
+      (ok {
+        level-advanced: (> new-level current-level),
+        new-level: new-level,
+        total-xp: new-total-xp,
+      })
+    )
+  )
+)
+
+(define-public (update-adventurer-score
+    (adventurer principal)
+    (score-gained uint)
+  )
+  (let ((profile (unwrap! (get-adventurer-profile adventurer) ERR-NOT-FOUND)))
+    (asserts! (is-authorized-operator tx-sender) ERR-UNAUTHORIZED)
+    (asserts! (<= score-gained u100000) ERR-INVALID-INPUT)
+
+    (map-set adventurer-profiles { adventurer: adventurer }
+      (merge profile {
+        lifetime-score: (+ (get lifetime-score profile) score-gained),
+        victories: (+ (get victories profile) u1),
+      })
+    )
+    (ok true)
+  )
+)
+
+;; ASSET TRANSFER FUNCTIONS
+
+(define-public (transfer-artifact
+    (artifact-id uint)
+    (recipient principal)
+  )
+  (let ((current-owner (unwrap! (nft-get-owner? bitforge-artifact artifact-id) ERR-NOT-FOUND)))
+    (asserts! (is-eq tx-sender current-owner) ERR-UNAUTHORIZED)
+    (nft-transfer? bitforge-artifact artifact-id tx-sender recipient)
+  )
+)
+
+(define-public (transfer-hero
+    (hero-id uint)
+    (recipient principal)
+  )
+  (let ((current-owner (unwrap! (nft-get-owner? bitforge-hero hero-id) ERR-NOT-FOUND)))
+    (asserts! (is-eq tx-sender current-owner) ERR-UNAUTHORIZED)
+    (nft-transfer? bitforge-hero hero-id tx-sender recipient)
+  )
+)
+
+;; CONTRACT INITIALIZATION
+
+;; Initialize contract deployer as authorized operator
+(map-set authorized-operators tx-sender true)
