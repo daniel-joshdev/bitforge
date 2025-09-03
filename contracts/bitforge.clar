@@ -201,3 +201,106 @@
     protocol-fee-bps: (var-get protocol-fee-bps),
   }
 )
+
+;; ADMINISTRATIVE FUNCTIONS
+
+(define-public (initialize-bitforge-protocol)
+  (begin
+    (asserts! (is-eq tx-sender (var-get contract-owner)) ERR-UNAUTHORIZED)
+    (map-set authorized-operators tx-sender true)
+    (ok "BitForge Protocol Successfully Initialized")
+  )
+)
+
+(define-public (authorize-operator (new-operator principal))
+  (begin
+    (asserts! (is-authorized-operator tx-sender) ERR-UNAUTHORIZED)
+    (map-set authorized-operators new-operator true)
+    (ok true)
+  )
+)
+
+(define-public (update-protocol-fee (new-fee-bps uint))
+  (begin
+    (asserts! (is-authorized-operator tx-sender) ERR-UNAUTHORIZED)
+    (asserts! (<= new-fee-bps u1000) ERR-INVALID-INPUT) ;; Max 10%
+    (var-set protocol-fee-bps new-fee-bps)
+    (ok true)
+  )
+)
+
+;; CORE GAMEPLAY FUNCTIONS
+
+(define-public (forge-artifact
+    (name (string-ascii 50))
+    (description (string-ascii 200))
+    (rarity (string-ascii 20))
+    (power-level uint)
+    (realm-id uint)
+  )
+  (let ((artifact-id (var-get next-artifact-id)))
+    (asserts! (is-authorized-operator tx-sender) ERR-UNAUTHORIZED)
+    (asserts! (is-valid-string name MIN-NAME-LENGTH MAX-NAME-LENGTH)
+      ERR-INVALID-INPUT
+    )
+    (asserts! (is-valid-string description u1 MAX-DESCRIPTION-LENGTH)
+      ERR-INVALID-INPUT
+    )
+    (asserts! (is-valid-rarity rarity) ERR-INVALID-RARITY)
+    (asserts! (and (> power-level u0) (<= power-level u1000)) ERR-INVALID-INPUT)
+    (asserts! (is-some (get-realm-info realm-id)) ERR-NOT-FOUND)
+
+    (try! (nft-mint? bitforge-artifact artifact-id tx-sender))
+
+    (map-set artifacts { artifact-id: artifact-id } {
+      name: name,
+      description: description,
+      rarity: rarity,
+      power-level: power-level,
+      origin-realm: realm-id,
+      experience: u0,
+      enhancement-level: u1,
+      creation-block: stacks-block-height,
+    })
+
+    (var-set next-artifact-id (+ artifact-id u1))
+    (ok artifact-id)
+  )
+)
+
+(define-public (summon-hero
+    (name (string-ascii 50))
+    (starting-realm uint)
+  )
+  (let ((hero-id (var-get next-hero-id)))
+    (asserts! (is-valid-string name MIN-NAME-LENGTH MAX-NAME-LENGTH)
+      ERR-INVALID-INPUT
+    )
+    (asserts! (is-some (get-realm-info starting-realm)) ERR-NOT-FOUND)
+    (asserts! (is-none (get-adventurer-profile tx-sender)) ERR-ALREADY-EXISTS)
+
+    (try! (nft-mint? bitforge-hero hero-id tx-sender))
+
+    (map-set heroes { hero-id: hero-id } {
+      name: name,
+      level: u1,
+      total-experience: u0,
+      equipped-artifacts: (list),
+      explored-realms: (list starting-realm),
+      achievement-points: u0,
+      birth-block: stacks-block-height,
+    })
+
+    (map-set adventurer-profiles { adventurer: tx-sender } {
+      primary-hero-id: hero-id,
+      lifetime-score: u0,
+      victories: u0,
+      bitcoin-earnings: u0,
+      leaderboard-rank: u0,
+      registration-block: stacks-block-height,
+    })
+
+    (var-set next-hero-id (+ hero-id u1))
+    (ok hero-id)
+  )
+)
